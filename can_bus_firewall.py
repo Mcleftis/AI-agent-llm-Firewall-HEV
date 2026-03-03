@@ -2,18 +2,45 @@ import time
 import logging
 import os
 import secrets
-import struct  # <--- ΑΠΑΡΑΙΤΗΤΟ για Binary Packing
+import struct
+import ctypes
 from typing import Dict
 from dotenv import load_dotenv
 
-import rust_can_firewall 
-
 load_dotenv()
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-class CANBusFirewall:
+# --- ΦΟΡΤΩΣΗ ΤΗΣ C++ ΜΗΧΑΝΗΣ (DLL) ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DLL_PATH = os.path.join(BASE_DIR, "cpp_firewall", "firewall.dll")
 
+CPP_FIREWALL_AVAILABLE = False
+try:
+    c_firewall = ctypes.CDLL(DLL_PATH)
+    
+    # Ορισμός τύπων για το inspect_packet
+    c_firewall.inspect_packet.argtypes = [ctypes.c_uint32, ctypes.c_char_p]
+    c_firewall.inspect_packet.restype = ctypes.c_int
+    
+    # Ορισμός τύπων για το validate_command
+    c_firewall.validate_command.argtypes = [ctypes.c_char_p]
+    c_firewall.validate_command.restype = ctypes.c_int
+    
+    CPP_FIREWALL_AVAILABLE = True
+    logging.info("🚀 [SECURITY] C++ Firewall Core Loaded Successfully!")
+except OSError:
+    logging.error(f"⚠️ [SECURITY ERROR] C++ DLL not found at {DLL_PATH}. Please compile firewall.cpp!")
+
+# --- ΕΞΑΓΩΓΗ ΣΥΝΑΡΤΗΣΗΣ ΓΙΑ ΤΟ SERVER.PY ---
+def validate_command(command: str) -> bool:
+    """Ελέγχει αν μια εντολή από το API είναι ασφαλής μέσω C++."""
+    if not CPP_FIREWALL_AVAILABLE:
+        return True # Αν δεν υπάρχει το DLL, περνάει (Fallback)
+    is_safe = c_firewall.validate_command(command.encode('utf-8'))
+    return bool(is_safe)
+
+
+class CANBusFirewall:
     def __init__(self, rate_limit: int = 100, burst_limit: int = 10) -> None:
         self.auth_token: str = os.getenv("CAN_AUTH_TOKEN", "DEFAULT_SECURE_TOKEN")
         self.blocked_ids: set = set()
@@ -51,38 +78,28 @@ class CANBusFirewall:
         Senior Level Inspection:
         1. Static Blacklist
         2. DoS Protection (Token Bucket)
-        3. Stateful Inspection (Rust: Freshness + Physics)
+        3. Stateful Inspection (C++ DLL)
         """
-        # 1. Blocked List
         if packet_id in self.blocked_ids:
             return False
 
-        # 2. DoS Check
         if not self._check_rate_limit(packet_id):
             logging.error(f"DoS ATTACK: ID {hex(packet_id)} rate limited.")
             return False
 
-        # 3. Rust Stateful Inspection
-        try:
-            # Το payload πρέπει να είναι ήδη packed ως (Float + Int)
-            is_safe = rust_can_firewall.inspect_packet(packet_id, payload)
-            
-            if not is_safe:
-                # Αν η Rust πει όχι, σημαίνει Replay ή Physics violation
-                logging.warning(f"SEC ALERT: ID {hex(packet_id)} blocked by Stateful Inspection (Replay/Spoofing).")
+        if CPP_FIREWALL_AVAILABLE:
+            try:
+                # Κλήση της C++
+                is_safe = c_firewall.inspect_packet(packet_id, payload)
+                if not is_safe:
+                    logging.warning(f"SEC ALERT: ID {hex(packet_id)} blocked by C++ Stateful Inspection.")
+                    return False
+            except Exception as e:
+                logging.error(f"FIREWALL ERROR: {e}")
                 return False
-                
-        except Exception as e:
-            logging.error(f"FIREWALL ERROR: {e}")
-            return False
 
         return True
 
-    # --- ΒΟΗΘΗΤΙΚΗ ΣΥΝΑΡΤΗΣΗ ΓΙΑ ΤΟΝ "ΑΠΟΣΤΟΛΕΑ" ---
     def create_valid_packet(self, value: float, counter: int) -> bytes:
-        """
-        Δημιουργεί ένα έγκυρο Secure CAN Frame (8 bytes).
-        Format: [Value (float, 4 bytes)] + [Counter (u32, 4 bytes)]
-        """
-        # '<fI' σημαίνει: Little Endian, float, unsigned int
+        """Δημιουργεί ένα έγκυρο Secure CAN Frame (8 bytes)."""
         return struct.pack('<fI', value, counter)

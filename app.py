@@ -7,11 +7,10 @@ from dotenv import load_dotenv
 load_dotenv()
 import requests
 import urllib3
-import json
 
 # Ρυθμίσεις Σύνδεσης με τον Server
-API_URL = "https://127.0.0.1:5000/api/v1"
-API_TOKEN = os.getenv("User_API_TOKEN")
+API_URL = "http://127.0.0.1:5000/api/v1" # Γύρισα σε HTTP αν δεν έχεις πιστοποιητικά. Αν έχεις βάλτο https.
+API_TOKEN = os.getenv("User_API_TOKEN", "fallback_token")
 
 # Απενεργοποίηση warnings SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -44,16 +43,16 @@ def get_dataset():
 
 df, status_msg = get_dataset()
 
-# --- HEADER ---
+#header
 st.title("🧠 True Semantic AI Control")
 st.markdown("### Powered by Flask API & Streamlit")
 
-# Έλεγχος Server
+#Check Server
 server_status = "🔴 OFFLINE"
 try:
-    test = requests.get(f"{API_URL}/vehicle/telemetry", verify=False , timeout=2)# nosec
+    test = requests.get(f"{API_URL}/vehicle/telemetry", verify=False , timeout=2)
     if test.status_code == 200:
-        server_status = "🟢 ONLINE (Connected via HTTPS)"
+        server_status = "🟢 ONLINE (API Connected)"
 except:
     server_status = "🔴 OFFLINE (Run server.py first!)"
 
@@ -64,8 +63,7 @@ else:
     col_status1.success(status_msg)
 col_status2.metric("API Connection", server_status)
 
-
-# --- SIDEBAR ---
+#Sidebar
 st.sidebar.header("🗣️ Talk to the Car")
 user_input = st.sidebar.text_input("Command:", placeholder="e.g. 'I want to go fast' or 'DROP TABLE users'")
 
@@ -82,21 +80,17 @@ if st.sidebar.button("🧠 Analyze Intent"):
                 payload = {"command": user_input}
                 headers = {"X-Auth-Token": API_TOKEN, "Content-Type": "application/json"}
                 
-                # Στέλνουμε το POST αίτημα στον Server
                 response = requests.post(
                     f"{API_URL}/control/intent", 
                     json=payload, 
                     headers=headers, 
-                    verify=False ,# nosec
-                    timeout=1000  # <--- ΠΡΟΣΘΕΣΕ ΑΥΤΟ ΕΔΩ! (Περιμένει μέχρι 1 λεπτό)
+                    verify=False,
+                    timeout=120 # <--- ΑΛΛΑΞΕ ΤΟ ΣΕ 120 (2 λεπτά)
                 )
                 
                 if response.status_code == 200:
                     data = response.json()
-                    
-                    # --- DEBUG SECTION ---
-                    st.write("🔍 DEBUG RAW DATA:", data) # Εδώ βλέπουμε τι στέλνει ο Server
-                    # ---------------------
+                    st.write("🔍 DEBUG RAW DATA:", data) 
 
                     st.session_state['mode'] = data.get('selected_mode', 'UNKNOWN')
                     st.session_state['aggr'] = data.get('throttle_sensitivity', 0.5)
