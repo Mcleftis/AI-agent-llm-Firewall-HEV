@@ -128,3 +128,4 @@ if __name__ == '__main__':
     print("\n🚦 HYBRID AI VEHICLE CONTROL SYSTEM (DEFENSIVE MODE) WITH C++ FIREWALL\n")
     # Το threaded=True διασφαλίζει ότι δεν κολλάει στα requests
     app.run(host='0.0.0.0', port=5000, debug=True, threaded=True) #threading
+    

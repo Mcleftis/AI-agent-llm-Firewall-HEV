@@ -1,8 +1,0 @@
-__pycache__
-*.csv
-.git
-.vscode
-models/
-*.log
-README.md
-Dockerfile
