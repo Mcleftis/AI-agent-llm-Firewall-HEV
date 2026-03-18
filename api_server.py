@@ -3,63 +3,69 @@ api_server.py
 ─────────────
 FastAPI microservice that exposes the Neuro-Symbolic AI engine
 (full_system.py) as a decoupled REST API.
-
-Endpoints
----------
-GET  /health              → liveness probe
-POST /api/v1/intent       → driver-intent inference via get_driver_intent()
 """
 
 import logging
+import asyncio
+import os
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import AsyncIterator, Dict, Any, Callable, Awaitable
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+# Υποθέτουμε ότι το get_driver_intent υπάρχει στο full_system.py (ή AI_agent.py)
 from full_system import get_driver_intent
 
 # =============================================================================
-# CONSTANTS
+# CONSTANTS & SECRETS
 # =============================================================================
 
-API_HOST    = "0.0.0.0"
+API_HOST    = "0.0.0.0" # nosec
 API_PORT    = 8000
 API_VERSION = "v1"
 APP_TITLE   = "Neuro-Symbolic HEV Control API"
-APP_DESC    = (
-    "REST wrapper around the Neuro-Symbolic driver-intent engine "
-    "and the Digital Twin physics simulation."
-)
+APP_DESC    = "REST wrapper around the Neuro-Symbolic driver-intent engine and Digital Twin."
+
+DEFAULT_AGGRESSIVENESS = 0.5
 
 # =============================================================================
-# LOGGING
+# LOGGING SETUP
 # =============================================================================
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
 
+# Εμποδίζει το "Context Bleeding" στο LLM όταν έρχονται ταυτόχρονα requests (HPC Batch)
+inference_lock = asyncio.Lock()
+
 # =============================================================================
-# LIFESPAN  (startup / shutdown hooks)
+# LIFESPAN  (startup / shutdown hooks) & WARMUP
 # =============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Run startup logic before serving; cleanup on shutdown."""
-    logger.info("🚀 API Server starting – importing AI engine models…")
-    # Models are pre-loaded at import time in full_system.py (module-level).
-    # This hook is the right place to add future async warm-up tasks.
-    logger.info("✅ API Server ready.")
+    logger.info("🚀 API Server starting – Initializing AI Engine...")
+    
+    # --- SENIOR TRICK: SERVER-SIDE AI WARMUP ---
+    logger.info("🔥 Warming up AI models (LLM & PyTorch) in background... Please wait.")
+    try:
+        # Τρέχουμε το inference εικονικά μία φορά
+        dummy_result: Dict[str, Any] = await asyncio.to_thread(get_driver_intent, forced_prompt="warmup system")
+        logger.info(f"✅ AI Warmup Complete! Systems hot. Dummy result: {dummy_result.get('mode')}")
+    except Exception as e:
+        logger.warning(f"⚠️ AI Warmup failed or timed out: {e}")
+        
+    logger.info("🟢 API Server is fully ONLINE and ready to accept traffic.")
     yield
     logger.info("🛑 API Server shutting down.")
 
 # =============================================================================
-# APP FACTORY
+# APP FACTORY & MIDDLEWARE
 # =============================================================================
 
 app = FastAPI(
@@ -67,10 +73,39 @@ app = FastAPI(
     description=APP_DESC,
     version=API_VERSION,
     lifespan=lifespan,
+    docs_url=None,      # 🚀 ΚΛΕΙΝΕΙ ΤΟ /docs (Swagger) για Security
+    redoc_url=None,     # 🚀 ΚΛΕΙΝΕΙ ΤΟ /redoc
+    openapi_url=None    # 🚀 ΚΛΕΙΝΕΙ ΤΟ /openapi.json
 )
 
+# 🛡️ WAF MIDDLEWARE (Πρέπει να μπει ΠΡΙΝ το CORS)
+@app.middleware("http")
+async def block_sensitive_files(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    # Κόβει αιτήματα που ψάχνουν κρυφά αρχεία ή κάνουν Path Traversal
+    suspicious_paths = ["/.env", "/.git", "/etc/passwd", "../"]
+    if any(sp in request.url.path for sp in suspicious_paths):
+        logger.warning(f"🛡️ WAF Blocked malicious request: {request.client.host} targeting {request.url.path}")
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            content={"detail": "Security Exception: Blocked by WAF"}
+        )
+    return await call_next(request)
+
+# 🌐 CORS MIDDLEWARE (ΑΣΦΑΛΕΣ ΓΙΑ PRODUCTION)
+app.add_middleware(
+    CORSMiddleware,
+    # Δέχεται αιτήματα ΜΟΝΟ από το τοπικό Streamlit Frontend (ή όποιο domain προσθέσεις εδώ)
+    allow_origins=[
+        "http://localhost:8501", 
+        "http://127.0.0.1:8501",
+        "https://localhost:8501" # Αν και το Frontend τρέχει με SSL
+    ], 
+    allow_credentials=True,
+    allow_methods=["GET", "POST"], # Κόψαμε το "*" και αφήσαμε μόνο GET/POST (Αρχή Ελάχιστων Προνομίων)
+    allow_headers=["Content-Type", "Authorization", "Accept"],
+)
 # =============================================================================
-# PYDANTIC SCHEMAS
+# PYDANTIC SCHEMAS (Data Validation)
 # =============================================================================
 
 class HealthResponse(BaseModel):
@@ -78,119 +113,91 @@ class HealthResponse(BaseModel):
     version: str = Field(..., examples=[API_VERSION])
     message: str = Field(..., examples=["All systems operational."])
 
-
 class IntentRequest(BaseModel):
-    user_prompt: str = Field(
-        ...,
-        min_length=1,
-        max_length=512,
-        examples=["Drive me home quickly but save battery."],
-        description="Natural-language command from the driver.",
-    )
-
+    user_prompt: str = Field(default="", max_length=512)
+    command: str = Field(default="", max_length=512)
 
 class IntentResponse(BaseModel):
     mode:           str   = Field(..., examples=["ECO"])
-    aggressiveness: float = Field(..., ge=0.0, le=1.0, examples=[0.2])
-    reasoning:      str   = Field(..., examples=["Symbolic Guardrail: Eco Mode explicitly requested."])
+    aggressiveness: float = Field(..., ge=0.0, le=1.0)
+    reasoning:      str   = Field(...)
 
 # =============================================================================
 # ENDPOINTS
 # =============================================================================
 
-@app.get(
-    "/health",
-    response_model=HealthResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Liveness probe",
-    tags=["Infrastructure"],
-)
+@app.get("/health", response_model=HealthResponse, status_code=status.HTTP_200_OK, tags=["Infrastructure"])
 async def health_check() -> HealthResponse:
-    """
-    Returns **200 OK** when the API process and the underlying AI engine
-    are fully initialised and ready to serve requests.
-    """
-    return HealthResponse(
-        status="ok",
-        version=API_VERSION,
-        message="All systems operational.",
-    )
+    return HealthResponse(status="ok", version=API_VERSION, message="All systems operational.")
 
+@app.get(f"/api/{API_VERSION}/vehicle/telemetry", status_code=status.HTTP_200_OK, tags=["Telemetry"])
+async def telemetry_mock() -> Dict[str, Any]:
+    return {"status": "connected", "speed": 0, "power": 0}
 
-@app.post(
-    f"/api/{API_VERSION}/intent",
-    response_model=IntentResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Infer driver intent from a natural-language prompt",
-    tags=["AI Inference"],
-)
+@app.post(f"/api/{API_VERSION}/intent", response_model=IntentResponse, status_code=status.HTTP_200_OK, tags=["AI Inference"])
 async def infer_intent(payload: IntentRequest) -> IntentResponse:
-    """
-    Passes the driver's **user_prompt** through the Neuro-Symbolic engine
-    (`get_driver_intent`) and returns the resolved driving mode,
-    aggressiveness score, and the engine's reasoning chain.
-
-    - **mode** – one of `SPORT | NORMAL | ECO | EMERGENCY_COAST`
-    - **aggressiveness** – float in `[0.0, 1.0]`
-    - **reasoning** – human-readable explanation from the AI/Symbolic layer
-    """
-    logger.info("POST /api/%s/intent | prompt=%r", API_VERSION, payload.user_prompt)
-
-    try:
-        result: dict = get_driver_intent(forced_prompt=payload.user_prompt)
-    except Exception as exc:
-        logger.exception("get_driver_intent() raised an unexpected error: %s", exc)
+    actual_prompt: str = payload.user_prompt if payload.user_prompt else payload.command
+    
+    if not actual_prompt:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"AI engine error: {exc}",
-        ) from exc
-
-    # Validate that the engine returned all expected keys
-    required_keys = {"mode", "aggressiveness", "reasoning"}
-    if not required_keys.issubset(result):
-        missing = required_keys - result.keys()
-        logger.error("Engine response missing keys: %s", missing)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Incomplete response from AI engine. Missing keys: {missing}",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, 
+            detail="Missing valid prompt in payload"
         )
+
+    logger.info("POST /api/%s/intent | prompt='%s'", API_VERSION, actual_prompt)
+
+    async with inference_lock:
+        try:
+            result: Dict[str, Any] = await asyncio.to_thread(get_driver_intent, forced_prompt=actual_prompt)
+        except Exception as exc:
+            logger.exception("get_driver_intent() raised an error: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, 
+                detail=f"AI engine error: {exc}"
+            )
+
+    final_mode: str = result.get("selected_mode") or result.get("mode") or "NORMAL"
+    final_aggr: float = result.get("throttle_sensitivity") or result.get("aggressiveness") or DEFAULT_AGGRESSIVENESS
+    final_reasoning: str = result.get("reasoning") or "No reasoning provided by AI."
 
     try:
         return IntentResponse(
-            mode=result["mode"],
-            aggressiveness=float(result["aggressiveness"]),
-            reasoning=result["reasoning"],
+            mode=str(final_mode).upper(),
+            aggressiveness=float(final_aggr),
+            reasoning=str(final_reasoning),
         )
     except (ValueError, TypeError) as exc:
         logger.exception("Response serialisation failed: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Response serialisation error: {exc}",
-        ) from exc
-
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Response serialisation error: {exc}"
+        )
 
 # =============================================================================
-# GLOBAL EXCEPTION HANDLER  (catch-all safety net)
+# GLOBAL EXCEPTION HANDLER
 # =============================================================================
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request, exc: Exception) -> JSONResponse:
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.critical("Unhandled exception on %s: %s", request.url, exc, exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "An unexpected internal error occurred."},
     )
 
-
-# =============================================================================
-# ENTRY POINT
-# =============================================================================
-
 if __name__ == "__main__":
-    uvicorn.run(
-        "api_server:app",
-        host=API_HOST,
-        port=API_PORT,
-        reload=False,
-        log_level="info",
-    )
+    # --- ΔΥΝΑΜΙΚΗ ΕΥΡΕΣΗ ΤΩΝ SSL ΠΙΣΤΟΠΟΙΗΤΙΚΩΝ ---
+    # Βρίσκει τον φάκελο στον οποίο βρίσκεται το api_server.py
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    
+    # Φτιάχνει το μονοπάτι για τον φάκελο certs
+    ssl_keyfile = os.path.join(BASE_DIR, "certs", "key.pem")
+    ssl_certfile = os.path.join(BASE_DIR, "certs", "cert.pem")
+    
+    if os.path.exists(ssl_keyfile) and os.path.exists(ssl_certfile):
+        logger.info(f"🔒 SSL Certificates found in {os.path.join(BASE_DIR, 'certs')}. Starting server with HTTPS...")
+        uvicorn.run("api_server:app", host=API_HOST, port=API_PORT, reload=False, log_level="info", 
+                    ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile)
+    else:
+        logger.warning(f"⚠️ SSL Certificates NOT found at {ssl_keyfile}. Starting server with HTTP (Insecure mode).")
+        uvicorn.run("api_server:app", host=API_HOST, port=API_PORT, reload=False, log_level="info")

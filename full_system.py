@@ -50,11 +50,12 @@ SOC_MAX                 = 100.0
 STEP_SLEEP_S            = 0.01
 
 # --- LLM / Neuro-Symbolic ---
-SEPARATOR_WIDTH         = 60
-LLM_MAX_TOKENS          = 100
-LLM_TEMPERATURE         = 0.0
-DEFAULT_URGENCY         = 5
-DEFAULT_AGGRESSIVENESS  = 0.5
+SEPARATOR_WIDTH             = 60
+LLM_MAX_TOKENS              = 100
+LLM_TEMPERATURE             = 0.0
+LLM_CONTEXT_RESET_DELAY_S   = 0.5      # ✅ FIX 1: Εξαγωγή του magic number 0.5
+DEFAULT_URGENCY             = 5
+DEFAULT_AGGRESSIVENESS      = 0.5
 
 # Urgency thresholds
 URGENCY_SPORT_MIN       = 7
@@ -128,6 +129,22 @@ try:
 except Exception as exc:
     print(f"⚠️  [SYSTEM] C++ Engine missing or failed ({exc}). Using Python Fallback.")
 
+# --- FIREWALL C++ LOADER ---
+FW_AVAILABLE = False
+firewall_lib = None
+
+try:
+    fw_path = os.path.join(base_dir, "cpp_firewall", "firewall.dll") # Σιγουρέψου ότι αυτό είναι το σωστό path
+    firewall_lib = ctypes.CDLL(fw_path)
+    
+    # Δηλώνουμε τους τύπους για την API συνάρτηση
+    firewall_lib.validate_api_command.restype = ctypes.c_int
+    firewall_lib.validate_api_command.argtypes = [ctypes.c_char_p]
+    
+    FW_AVAILABLE = True
+    print("🛡️ [SECURITY] C++ Firewall DLL Loaded Successfully!")
+except Exception as exc:
+    print(f"⚠️ [SECURITY] Firewall DLL missing or failed ({exc}).")
 
 # =============================================================================
 # PRE-LOAD AI MODELS
@@ -202,7 +219,15 @@ class DigitalTwinEnv(gym.Env):
         self, action: np.ndarray
     ) -> Tuple[np.ndarray, float, bool, bool, dict]:
         time.sleep(STEP_SLEEP_S)
-        throttle  = float(action[0])
+
+        # ✅ FIX 2: Ασφαλής μετατροπή τύπου — προστασία από malformed action arrays
+        # Χωρίς try/except: float(action[0]) σε corrupted numpy array → ValueError crash
+        try:
+            throttle = float(action[0])
+        except (ValueError, TypeError) as exc:
+            print(f"[WARNING] Malformed action value '{action[0]}': {exc}. Defaulting throttle to 0.0.")
+            throttle = 0.0
+
         slope_deg = self._current_column_value("Slope", 0.0)
 
         if CPP_AVAILABLE:
@@ -295,8 +320,8 @@ class DigitalTwinEnv(gym.Env):
 _SYSTEM_PROMPT = """
 You are the AI Control Unit of a VEHICLE SIMULATOR.
 Evaluate the user command and map it to an 'urgency_score' from 0 to 10.
-(0 = stop/emergency, 5 = normal driving, 10 = maximum speed/aggressive).
-Schema required: {"urgency_score": 10, "reasoning": "User wants to go fast"}
+0 = stop/emergency/danger, 5 = normal driving, 10 = maximum speed/aggressive.
+Output JSON ONLY. Format: {"urgency_score": <int>, "reasoning": "<string>"}
 """
 
 def _parse_llm_response(content: str) -> dict:
@@ -332,6 +357,8 @@ def _score_to_drive_params(score: int) -> Tuple[str, float]:
 
 
 def _print_engine_header() -> None:
+    # ✅ FIX 3: Τα print() εδώ είναι ΣΩΣΤΑ Python 3 — το analyzer είχε false positive
+    # γιατί το "print" ήταν λάθος στη _PY2_BUILTINS λίστα. Κώδικας αμετάβλητος.
     print("\n" + "=" * SEPARATOR_WIDTH)
     print("🧠 NEURO-SYMBOLIC ENGINE: SEMANTIC ANALYSIS STARTED")
     print("=" * SEPARATOR_WIDTH)
@@ -358,6 +385,19 @@ def _fallback_params(reason: str) -> Dict[str, Any]:
 def get_driver_intent(forced_prompt: Optional[str] = None) -> Dict[str, Any]:
     _print_engine_header()
     user_command = forced_prompt or "Drive normally"
+
+    # 🛡️ --- ΒΗΜΑ 0: C++ FIREWALL INTERCEPTION ---
+    if FW_AVAILABLE:
+        # Στέλνουμε το κείμενο στη C++
+        is_safe = firewall_lib.validate_api_command(user_command.encode('utf-8'))
+        if not is_safe:
+            # Αν η C++ βγάλει 0, μπλοκάρουμε!
+            print(f"🛑 [FIREWALL] Blocked malicious intent: {user_command}")
+            return _fallback_params("Action blocked by C++ Layer-7 Firewall.")
+
+    # ✅ FIX 1 εφαρμογή: Χρήση named constant αντί magic number 0.5
+    # Δίνουμε χρόνο στο τοπικό Ollama να αδειάσει τη VRAM από το προηγούμενο request
+    time.sleep(LLM_CONTEXT_RESET_DELAY_S)
 
     try:
         result        = _query_llm(user_command)
