@@ -40,7 +40,7 @@ jobs:
     # 4. Τρέχουμε τα Unit Tests (Δεν θέλουν API, τρέχουν αστραπιαία)
     - name: Run Unit Tests (DB & C++ Core)
       run: |
-        pytest testing/unit/ -v --html=reports/unit_report.html
+        python -m pytest testing/unit/ -v --html=reports/unit_report.html
 
     # 5. Σηκώνουμε το API στο παρασκήνιο (για να περάσουν τα Integration Tests)
     - name: Boot API Server (Background)
@@ -53,11 +53,11 @@ jobs:
     # 6. Τρέχουμε τα Integration Tests (Χτυπάνε το API που μόλις σηκώσαμε)
     - name: Run Integration Tests (API & LLM Logic)
       run: |
-        pytest testing/integration/ -v --html=reports/integration_report.html
+        python -m pytest testing/integration/ -v --html=reports/integration_report.html
 
     # 7. Αποθηκεύουμε τα HTML Reports ακόμα και αν τα τεστ αποτύχουν
     - name: Upload QA HTML Reports
-      uses: actions/upload-artifact@v4  # <--- Η ΜΟΝΑΔΙΚΗ ΑΛΛΑΓΗ (από v3 σε v4)
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: QA-Test-Reports
