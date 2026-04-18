@@ -1,70 +1,38 @@
 name: Enterprise QA & DevSecOps Pipeline
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
+on: [push, pull_request]
 jobs:
   build-and-test:
-    # 1. Τρέχουμε σε Windows για να δουλέψουν τα .dll της C++
-    runs-on: windows-latest 
-
+    runs-on: windows-latest
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-
-    - name: Set up Python 3.9
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
-        python-version: 3.9
-        cache: 'pip'
-
-    - name: Install Python Dependencies & QA Tools
+        python-version: "3.11"
+    - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        # Εγκατάσταση των βασικών βιβλιοθηκών
-        pip install requests flask pytest pytest-html bandit safety numpy pandas stable-baselines3
-        
-    # 2. Ασφάλεια Κώδικα (Static Analysis)
-    - name: Security Check (Bandit)
-      run: bandit -r testing/ -ll
-
-    # 3. Compiling the C++ Core Engine
-    - name: Build C++ Physics Engine (DLL)
+        pip install requests flask pytest pytest-html bandit safety numpy pandas stable-baselines3 ollama
+    - name: Build C++ Core and Firewall
       run: |
-        # Ρίχνουμε το DLL κατευθείαν μέσα στον φάκελο των Unit Tests
         g++ -shared -o testing/unit/physics.dll cpp_core_physics_engine/physics_solver.cpp -fopenmp
-      
-    # 4. Τρέχουμε τα Unit Tests
-    - name: Run Unit Tests (DB & C++ Core)
+        g++ -shared -o cpp_firewall/firewall.dll cpp_firewall/firewall.cpp
+    - name: Run Unit Tests
       env:
-        # Αναγκάζουμε την Python να βλέπει τον κεντρικό φάκελο
         PYTHONPATH: .
-      run: |
-        python -m pytest testing/unit/ -v --html=reports/unit_report.html
-
-    # 5. Σηκώνουμε το API στο παρασκήνιο (για να περάσουν τα Integration Tests)
-    - name: Boot API Server (Background)
+      run: python -m pytest testing/unit/ -v --html=reports/unit_report.html
+    - name: Boot API Server
       env:
-        # Ψεύτικα κλειδιά και PYTHONPATH για να μην κρασάρει ο Server
-        SECRET_KEY: "dummy_ci_cd_key"
+        SECRET_KEY: "dummy"
         OLLAMA_URL: "http://127.0.0.1:11434"
         PYTHONPATH: .
       run: |
         Start-Process python -ArgumentList "api/server.py" -NoNewWindow
         Start-Sleep -Seconds 10
-        
-    # 6. Τρέχουμε τα Integration Tests (Χτυπάνε το API που μόλις σηκώσαμε)
-    - name: Run Integration Tests (API & LLM Logic)
+    - name: Run Integration Tests
       env:
-        # Αναγκάζουμε την Python να βλέπει τον κεντρικό φάκελο
         PYTHONPATH: .
-      run: |
-        python -m pytest testing/integration/ -v --html=reports/integration_report.html
-
-    # 7. Αποθηκεύουμε τα HTML Reports
+      run: python -m pytest testing/integration/ -v --html=reports/integration_report.html
     - name: Upload QA HTML Reports
       uses: actions/upload-artifact@v4
       if: always()
