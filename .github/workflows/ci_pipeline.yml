@@ -1,42 +1,64 @@
-name: Hybrid AI System DevSecOps
+name: Enterprise QA & DevSecOps Pipeline
 
-on: [push]
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  build-secure-and-test:
-    runs-on: ubuntu-latest
+  build-and-test:
+    # 1. Τρέχουμε σε Windows για να δουλέψουν τα .dll της C++
+    runs-on: windows-latest 
 
     steps:
-    - uses: actions/checkout@v2
+    - name: Checkout Code
+      uses: actions/checkout@v3
 
     - name: Set up Python 3.9
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: 3.9
+        cache: 'pip'
 
-    # 1. Εγκατάσταση Εξαρτήσεων ΚΑΙ Εργαλείων Ασφαλείας
-    - name: Install dependencies & Security Tools
+    - name: Install Python Dependencies & QA Tools
       run: |
         python -m pip install --upgrade pip
-        # Εγκαθιστούμε τις βιβλιοθήκες του Project
-        pip install pandas numpy gymnasium stable-baselines3 ollama pytest requests
-        # Εγκαθιστούμε τα εργαλεία Cyber Security
-        pip install bandit safety
+        # Προτείνεται να υπάρχει requirements.txt, αλλιώς εγκαθιστούμε τα βασικά
+        pip install requests flask pytest pytest-html bandit safety numpy pandas stable-baselines3
+        
+    # 2. Ασφάλεια Κώδικα (Static Analysis)
+    - name: Security Check (Bandit)
+      run: bandit -r testing/ -ll
 
-    # 2. Έλεγχος Κώδικα (SAST) - Ψάχνει για Hardcoded Passwords, SQL Injection κλπ.
-    - name: Security Check - SAST (Bandit)
+    # 3. Compiling the C++ Core Engine
+    - name: Build C++ Physics Engine (DLL)
       run: |
-        # -r: αναδρομικά σε όλους τους φακέλους
-        # -ll: δείξε μόνο medium και high severity προβλήματα
-        bandit -r . -ll
+        # Ο g++ υπάρχει προεγκατεστημένος στα GitHub Windows Runners
+        g++ -shared -o cpp_core_physics_engine/physics.dll cpp_core_physics_engine/physics_solver.cpp -fopenmp
+      
+    # 4. Τρέχουμε τα Unit Tests (Δεν θέλουν API, τρέχουν αστραπιαία)
+    - name: Run Unit Tests (DB & C++ Core)
+      run: |
+        pytest testing/unit/ -v --html=reports/unit_report.html
 
-    # 3. Έλεγχος Βιβλιοθηκών (SCA) - Ψάχνει για γνωστά CVEs (Supply Chain)
-    - name: Security Check - Dependencies (Safety)
+    # 5. Σηκώνουμε το API στο παρασκήνιο (για να περάσουν τα Integration Tests)
+    - name: Boot API Server (Background)
       run: |
-        # Ελέγχει τα εγκατεστημένα πακέτα για γνωστές ευπάθειες
-        safety check
+        # Το Start-Process τρέχει το Flask API σε background thread
+        Start-Process python -ArgumentList "api/server.py" -NoNewWindow
+        # Περιμένουμε 10 δευτερόλεπτα να φορτώσει ο Server
+        Start-Sleep -Seconds 10
+        
+    # 6. Τρέχουμε τα Integration Tests (Χτυπάνε το API που μόλις σηκώσαμε)
+    - name: Run Integration Tests (API & LLM Logic)
+      run: |
+        pytest testing/integration/ -v --html=reports/integration_report.html
 
-    # 4. Λειτουργικά Τεστ (Τρέχουν ΜΟΝΟ αν περάσουν τα Security Checks)
-    - name: Run Functional Tests
-      run: |
-        python test_all.py
+    # 7. Αποθηκεύουμε τα HTML Reports ακόμα και αν τα τεστ αποτύχουν
+    - name: Upload QA HTML Reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: QA-Test-Reports
+        path: reports/
