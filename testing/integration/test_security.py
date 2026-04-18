@@ -1,6 +1,6 @@
 import time
 import random
-from can_bus_firewall import CANBusFirewall
+from cpp_firewall.hev_idps_bridge import CANBusFirewall
 
 def start_hacking_simulation():
     print("ACTIVATING FULL SECURITY SUITE TEST...\n")
@@ -15,7 +15,7 @@ def start_hacking_simulation():
     #hacking
     hacker_token = "HACKER_123"#eskemmena lathos kwdikos
     print(f"[HACKER] Trying to login with token: '{hacker_token}'")
-    if firewall.verify_token(hacker_token):#synarthsh tou can_bus_firewall
+    if firewall.verify_token(hacker_token):#synarthsh tou cpp_firewall.hev_idps_bridge
         print("FAILURE: Hacker got access!")
     else:
         print("SUCCESS: Hacker blocked.")

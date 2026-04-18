@@ -24,7 +24,7 @@ jobs:
     - name: Install Python Dependencies & QA Tools
       run: |
         python -m pip install --upgrade pip
-        # Προτείνεται να υπάρχει requirements.txt, αλλιώς εγκαθιστούμε τα βασικά
+        # Εγκατάσταση των βασικών βιβλιοθηκών
         pip install requests flask pytest pytest-html bandit safety numpy pandas stable-baselines3
         
     # 2. Ασφάλεια Κώδικα (Static Analysis)
@@ -34,28 +34,37 @@ jobs:
     # 3. Compiling the C++ Core Engine
     - name: Build C++ Physics Engine (DLL)
       run: |
-        # Ο g++ υπάρχει προεγκατεστημένος στα GitHub Windows Runners
-        g++ -shared -o cpp_core_physics_engine/physics.dll cpp_core_physics_engine/physics_solver.cpp -fopenmp
+        # Ρίχνουμε το DLL κατευθείαν μέσα στον φάκελο των Unit Tests
+        g++ -shared -o testing/unit/physics.dll cpp_core_physics_engine/physics_solver.cpp -fopenmp
       
-    # 4. Τρέχουμε τα Unit Tests (Δεν θέλουν API, τρέχουν αστραπιαία)
+    # 4. Τρέχουμε τα Unit Tests
     - name: Run Unit Tests (DB & C++ Core)
+      env:
+        # Αναγκάζουμε την Python να βλέπει τον κεντρικό φάκελο
+        PYTHONPATH: .
       run: |
         python -m pytest testing/unit/ -v --html=reports/unit_report.html
 
     # 5. Σηκώνουμε το API στο παρασκήνιο (για να περάσουν τα Integration Tests)
     - name: Boot API Server (Background)
+      env:
+        # Ψεύτικα κλειδιά και PYTHONPATH για να μην κρασάρει ο Server
+        SECRET_KEY: "dummy_ci_cd_key"
+        OLLAMA_URL: "http://127.0.0.1:11434"
+        PYTHONPATH: .
       run: |
-        # Το Start-Process τρέχει το Flask API σε background thread
         Start-Process python -ArgumentList "api/server.py" -NoNewWindow
-        # Περιμένουμε 10 δευτερόλεπτα να φορτώσει ο Server
         Start-Sleep -Seconds 10
         
     # 6. Τρέχουμε τα Integration Tests (Χτυπάνε το API που μόλις σηκώσαμε)
     - name: Run Integration Tests (API & LLM Logic)
+      env:
+        # Αναγκάζουμε την Python να βλέπει τον κεντρικό φάκελο
+        PYTHONPATH: .
       run: |
         python -m pytest testing/integration/ -v --html=reports/integration_report.html
 
-    # 7. Αποθηκεύουμε τα HTML Reports ακόμα και αν τα τεστ αποτύχουν
+    # 7. Αποθηκεύουμε τα HTML Reports
     - name: Upload QA HTML Reports
       uses: actions/upload-artifact@v4
       if: always()
