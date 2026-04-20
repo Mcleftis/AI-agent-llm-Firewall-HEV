@@ -1,74 +1,51 @@
-import time
-import random
+import pytest
 from cpp_firewall.hev_idps_bridge import CANBusFirewall
 
-def start_hacking_simulation():
-    print("ACTIVATING FULL SECURITY SUITE TEST...\n")
-    
-    #arxikopoihsh firewall
-    firewall = CANBusFirewall(max_delta=50, max_packets=20)
+class TestCANBusSecurity:
 
     
-    #authentication check
-    print("Phase 1: Authentication Check")
-    
-    #hacking
-    hacker_token = "HACKER_123"#eskemmena lathos kwdikos
-    print(f"[HACKER] Trying to login with token: '{hacker_token}'")
-    if firewall.verify_token(hacker_token):#synarthsh tou cpp_firewall.hev_idps_bridge
-        print("FAILURE: Hacker got access!")
-    else:
-        print("SUCCESS: Hacker blocked.")
+    @pytest.fixture
+    def firewall(self):
+        return CANBusFirewall(max_delta=50, max_packets=20)
 
-    #swstos kwdikos
-    driver_token = "SECRET_DRIVER_KEY_2026"
-    print(f"[DRIVER] Trying to login with token: '{driver_token}'")
-    if firewall.verify_token(driver_token):
-        print("SUCCESS: Driver Access Granted.")
-    else:
-        print("FAILURE: Valid Driver blocked!")
-
-    #spoofing
-    print("\nPhase 2: Spoofing Attack (Teleport Check)")
     
-    #normal odhghsh
-    packet_id = 0x100 #engine id
-    current_speed = 50.0
-    
-    #kaleis to firewall na to eleksei
-    firewall.inspect_packet(packet_id, str(current_speed))
+    def test_authentication_rejection(self, firewall):
+        """Ελέγχει αν το firewall μπλοκάρει άγνωστα/hacker tokens."""
+        hacker_token = "HACKER_123"
+        
+        
+        assert not firewall.verify_token(hacker_token), "CRITICAL: Firewall allowed unauthorized hacker access!"
 
-    fake_speed = 200.0
-    print(f"[HACKER] Sending fake speed {fake_speed} km/h (Instant Jump)...")
-    
-    is_safe = firewall.inspect_packet(packet_id, str(fake_speed))
-    
-    if is_safe:
-        print("FAILURE: The attack passed!")
-    else:
-        print("SUCCESS: Attack Blocked (Delta Check triggered).")
+    def test_authentication_acceptance(self, firewall):
+        """Ελέγχει αν το firewall επιτρέπει τα σωστά tokens."""
+        driver_token = "SECRET_DRIVER_KEY_2026"
+        
+        assert firewall.verify_token(driver_token), "CRITICAL: Firewall blocked a valid driver token!"
 
-    #DoS attack
-    print("\nPhase 3: DoS Attack (Flooding)")
-    print("[HACKER] Flooding the bus with rapid messages...")
     
-    blocked_count = 0
-    #stelnoume astrapiaia 50 paketa xwris sleep
-    for i in range(50):
-        #vazoume epitrepto id gia na tsekaroume an einai fysiologiko, na apostelontai tosa paketa
-        is_safe = firewall.inspect_packet(0x100, str(50 + i)) 
-        if not is_safe:
-            blocked_count += 1
-            
-    print(f"Firewall Blocked: {blocked_count}/50 packets.")
-    if blocked_count > 0:
-        print("SUCCESS: DoS Attack Detected & Mitigated.")
-    else:
-        print("FAILURE: Firewall didn't catch the flood.")
+    def test_spoofing_teleport_check(self, firewall):
+        """Ελέγχει αν το firewall κόβει αφύσικα άλματα στις τιμές των αισθητήρων (max_delta)."""
+        packet_id = 0x100
+        
+        
+        firewall.inspect_packet(packet_id, "50.0")
+        
+        
+        is_safe = firewall.inspect_packet(packet_id, "200.0")
+        
+        
+        assert not is_safe, "CRITICAL: Firewall failed to detect speed spoofing (Delta limit bypassed)!"
 
-    print("\n" + "="*40)
-    print("SECURITY AUDIT COMPLETE")
-    print("="*40)
-
-if __name__ == "__main__":
-    start_hacking_simulation()
+    
+    def test_dos_flooding_mitigation(self, firewall):
+        """Ελέγχει αν το firewall κόβει το spamming πακέτων μετά το όριο max_packets."""
+        blocked_count = 0
+        
+        
+        for i in range(50):
+            is_safe = firewall.inspect_packet(0x100, str(50 + i))
+            if not is_safe:
+                blocked_count += 1
+                
+        
+        assert blocked_count >= 30, f"CRITICAL: DoS Attack Successful! Only {blocked_count}/50 packets blocked."
