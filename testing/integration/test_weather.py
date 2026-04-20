@@ -2,7 +2,7 @@ import os
 import pytest
 import pandas as pd
 from stable_baselines3 import PPO
-from AI_agent import ProfessionalHybridEnv, DATA_FILENAME
+from AI_agent import ProfessionalHybridEnv, DATA_FILENAME, _load_telemetry
 
 class TestAIAgentExecution:
     
@@ -28,7 +28,8 @@ class TestAIAgentExecution:
             
         # Αν όλα πάνε καλά, τα φορτώνουμε στη μνήμη
         model = PPO.load(model_path)
-        env = ProfessionalHybridEnv(df) # Δεν βάζουμε θερμοκρασίες, παίρνει τη default!
+        arrays = _load_telemetry()
+        env = ProfessionalHybridEnv(arrays)
         
         return env, model
 

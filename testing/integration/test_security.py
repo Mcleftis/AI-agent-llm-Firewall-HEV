@@ -6,7 +6,7 @@ class TestCANBusSecurity:
     
     @pytest.fixture
     def firewall(self):
-        return CANBusFirewall(max_delta=50, max_packets=20)
+        return CANBusFirewall()
 
     
     def test_authentication_rejection(self, firewall):

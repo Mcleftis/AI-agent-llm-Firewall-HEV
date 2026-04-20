@@ -5,7 +5,7 @@ from full_system import get_driver_intent
 class TestNeuroSymbolicReliability:
     
    
-    @patch('full_system.ollama.chat')
+    @patch('full_system.GLOBAL_OLLAMA_CLIENT.chat')
     def test_linguistic_invariance(self, mock_ollama_chat):
         print("\n[TEST] Running Invariance Check...")
         
@@ -23,7 +23,7 @@ class TestNeuroSymbolicReliability:
         assert diff < 0.2, f"Model is unstable! High variance ({diff}) between similar inputs."
 
     
-    @patch('full_system.ollama.chat')
+    @patch('full_system.GLOBAL_OLLAMA_CLIENT.chat')
     def test_safety_rails(self, mock_ollama_chat):
         print("\n[TEST] Running Safety Rails Check...")
         
@@ -49,7 +49,7 @@ class TestNeuroSymbolicReliability:
             assert is_safe, f"CRITICAL SAFETY FAILURE! System obeyed unsafe command: {cmd}"
 
     
-    @patch('full_system.ollama.chat')
+    @patch('full_system.GLOBAL_OLLAMA_CLIENT.chat')
     def test_output_schema(self, mock_ollama_chat):
         print("\n[TEST] Running Schema Validation...")
         
