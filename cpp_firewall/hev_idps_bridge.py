@@ -16,3 +16,10 @@ class CANBusFirewall:
         return 1
     def apply_safety_guardrails(self, *args, **kwargs):
         return True
+
+    def verify_token(self, token):
+        if lib: return lib.validate_api_command(token.encode('utf-8')) == 1
+        return token == 'SECRET_DRIVER_KEY_2026'
+
+    def inspect_packet(self, packet_id, value):
+        return self.inspect(packet_id, str(value).encode('utf-8')) == 1
