@@ -104,6 +104,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"], # Κόψαμε το "*" και αφήσαμε μόνο GET/POST (Αρχή Ελάχιστων Προνομίων)
     allow_headers=["Content-Type", "Authorization", "Accept"],
 )
+
 # =============================================================================
 # PYDANTIC SCHEMAS (Data Validation)
 # =============================================================================
@@ -195,12 +196,9 @@ if __name__ == "__main__":
     ssl_certfile = os.path.join(BASE_DIR, "certs", "cert.pem")
     
     if os.path.exists(ssl_keyfile) and os.path.exists(ssl_certfile):
-        logger.info(f"🔒 SSL Certificates found in {os.path.join(BASE_DIR, 'certs')}. Starting server with HTTPS...")
+        logger.info(f"🔒 SSL Certificates found. Starting server with HTTPS...")
         uvicorn.run("api_server:app", host=API_HOST, port=API_PORT, reload=False, log_level="info", 
                     ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile)
     else:
-        logger.warning(f"⚠️ SSL Certificates NOT found at {ssl_keyfile}. Starting server with HTTP (Insecure mode).")
+        logger.warning(f"🔓 SSL Certificates NOT found. Starting server with HTTP (Insecure mode).")
         uvicorn.run("api_server:app", host=API_HOST, port=API_PORT, reload=False, log_level="info")
-    else:
-        logger.warning('?? No SSL Certificates found. Starting server in HTTP mode...')
-        uvicorn.run('api_server:app', host=API_HOST, port=API_PORT)
