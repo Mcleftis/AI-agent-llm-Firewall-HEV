@@ -27,16 +27,22 @@ jobs:
         OLLAMA_URL: "http://127.0.0.1:11434"
         PYTHONPATH: .
       run: |
-        Start-Process python -ArgumentList "api_server.py" -NoNewWindow
+        Start-Process python -ArgumentList "-m uvicorn api_server:app --host 127.0.0.1 --port 8000" -RedirectStandardOutput server_out.log -RedirectStandardError server_err.log -NoNewWindow
         Start-Sleep -Seconds 10
     - name: Run Integration Tests
       env:
         PYTHONPATH: .
       run: python -m pytest testing/integration/ -v --html=reports/integration_report.html
+    - name: Debug Server Logs
+      if: failure()
+      run: |
+        echo === SERVER ERROR LOGS ===
+        cat server_err.log 2> $null
+        echo === SERVER OUTPUT LOGS ===
+        cat server_out.log 2> $null
     - name: Upload QA HTML Reports
       uses: actions/upload-artifact@v4
       if: always()
       with:
         name: QA-Test-Reports
         path: reports/
-
