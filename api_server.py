@@ -201,3 +201,6 @@ if __name__ == "__main__":
     else:
         logger.warning(f"⚠️ SSL Certificates NOT found at {ssl_keyfile}. Starting server with HTTP (Insecure mode).")
         uvicorn.run("api_server:app", host=API_HOST, port=API_PORT, reload=False, log_level="info")
+    else:
+        logger.warning('?? No SSL Certificates found. Starting server in HTTP mode...')
+        uvicorn.run('api_server:app', host=API_HOST, port=API_PORT)
