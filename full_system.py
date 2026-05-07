@@ -49,6 +49,11 @@ SOC_MIN                 = 0.0
 SOC_MAX                 = 100.0
 STEP_SLEEP_S            = 0.01
 
+# --- GPU/CPU DLL paths ---
+USE_GPU      = True
+GPU_DLL_PATH = './cpp_core_physics_engine/physics_gpu.dll'
+CPU_DLL_PATH = './cpp_core_physics_engine/physics.dll'
+
 # --- LLM / Neuro-Symbolic ---
 SEPARATOR_WIDTH             = 60
 LLM_MAX_TOKENS              = 100
@@ -101,13 +106,22 @@ class VehicleState(ctypes.Structure):
 # C++ ENGINE LOADER
 # =============================================================================
 
+# ✅ FIX: base_dir ορίζεται εδώ (module level) ώστε να είναι διαθέσιμο
+#         τόσο στο Physics loader όσο και στο Firewall loader παρακάτω.
+base_dir = os.path.dirname(os.path.abspath(__file__))
+
 CPP_AVAILABLE = False
 physics_lib   = None
 
 try:
-    base_dir    = os.path.dirname(os.path.abspath(__file__))
-    lib_path    = os.path.join(base_dir, "cpp_core_physics_engine", "physics.dll")
-    physics_lib = ctypes.CDLL(lib_path)
+    # --- CUDA GPU INTEGRATION (Drop-In ABI Replacement) ---
+    if USE_GPU and os.path.exists(GPU_DLL_PATH):
+        print("🚀 [SYSTEM] GPU Detected! Loading CUDA Physics Engine...")
+        physics_lib = ctypes.cdll.LoadLibrary(GPU_DLL_PATH)
+    else:
+        print("⚙️ [SYSTEM] Loading CPU Physics Engine (Fallback)...")
+        physics_lib = ctypes.cdll.LoadLibrary(CPU_DLL_PATH)
+    # ------------------------------------------------------
 
     physics_lib.calculate_acceleration.restype  = ctypes.c_float
     physics_lib.calculate_acceleration.argtypes = [
@@ -134,7 +148,7 @@ FW_AVAILABLE = False
 firewall_lib = None
 
 try:
-    fw_path = os.path.join(base_dir, "cpp_firewall", "firewall.dll") # Σιγουρέψου ότι αυτό είναι το σωστό path
+    fw_path = os.path.join(base_dir, "cpp_firewall", "firewall.dll")
     firewall_lib = ctypes.CDLL(fw_path)
     
     # Δηλώνουμε τους τύπους για την API συνάρτηση

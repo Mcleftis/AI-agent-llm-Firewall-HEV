@@ -1,0 +1,4 @@
+Learning Rate,Fuel Consumption (L),Model Path
+0.0003,26.442132684190668,models\ppo_hev_lr_0.0003
+0.001,26.540584217168984,models\ppo_hev_lr_0.001
+0.0001,28.524675552840296,models\ppo_hev_lr_0.0001
