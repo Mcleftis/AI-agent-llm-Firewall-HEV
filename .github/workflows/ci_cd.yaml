@@ -28,9 +28,9 @@ jobs:
 
       - name: Build C++ Core and Firewall (Linux Native)
         run: |
-          # Μετατροπή των DLLs σε SOs για να τρέξουν στο Cloud Docker Container
-          g++ -shared -fPIC -o testing/unit/physics.so cpp_core_physics_engine/physics_solver.cpp -fopenmp
-          g++ -shared -fPIC -o cpp_firewall/firewall.so cpp_firewall/firewall.cpp
+          # Compilation με τα νέα paths της αρχιτεκτονικής
+          g++ -shared -fPIC -o testing/unit/physics.so cpp_core/physics_solver.cpp -fopenmp
+          g++ -shared -fPIC -o cpp_core/cpp_firewall/firewall.so cpp_core/cpp_firewall/firewall.cpp
 
       - name: Run PyTest QA Suite
         env:
